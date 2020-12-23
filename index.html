@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="ja">
+    <head>
+        <title>3Dマップ</title>
+        <meta charset='utf-8'>
+        <meta http-equiv="X-UA-Compatible" content="IE=EDGE" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <style>
+            html, body {
+                margin: 0;
+            }
+            
+            .chose {
+                font: 12px/20px 'Hiragino Sans', 'Hiragino Mincho ProN', Meiryo, 'MS PGothic', 'Noto Sans', 'Noto Sans CJK SC', system-ui, sans-serif;
+                position: absolute;
+                width: 150px;
+                top: 0;
+                right: 90px;
+                padding: 10px;
+            }
+            .chose .chose-inner {
+                background-color: #fff;
+                border-radius: 5px;
+                padding: 5px;
+                margin-bottom: 10px;
+                box-shadow:0 0 0 2px rgba(0,0,0,0.1);
+            }
+            .chose-inner fieldset {
+                border: none;
+                padding: 0;
+                margin: 0 0 5px;
+            }
+            .chose-inner fieldset:last-child {
+                margin: 0;
+            }
+            .chose-inner select {
+                width: 100%;
+            }
+            .chose-inner label {
+                display: block;
+                font-weight: bold;
+                margin: 0 0 5px;
+            }
+        </style>
+        <link href="https://maxcdn.bootstrapcdn.com/font-awesome/4.6.3/css/font-awesome.min.css" rel="stylesheet">
+    </head>
+
+    <body>
+        <div style="position: absolute; width: 100%; height: 100%;" id="container">
+        </div>
+        <div class='chose top'>
+            <div class='chose-inner'>
+                <fieldset>
+                    <label>日本百名山</label>
+                    <select id='chose-select' name='chose-select' onchange='switchMountain(this)'>
+                    </select>
+                </fieldset>
+            </div>
+        </div>
+    </body>
+    <script type="text/javascript" src="./procedural-gl.min.js"></script>
+    <script type="text/javascript" src="./mountains.js"></script>
+    <script type="text/javascript" src="./route.js"></script>
+    <script type="text/javascript">
+    var params = {};
+    parsePramameter(params);
+    var mountainName = params.name ? decodeURI(params.name) : '剱岳';
+    addStyle(mountains);
+    var configuration = {
+        // Minimum distance camera can approach scene
+        // どれだけズームインできるか
+        minDistance: 1000,
+        // Maximum distance camera can move from scene
+        // どれだけズームアウトできるか
+        maxDistance: 18000,
+        // Maximum distance camera target can move from scene
+        maxBounds: 9999999,
+        // Minimum polar angle of camera
+        // minPolarAngle: 0.25 * Math.PI,
+        // Maximum polar angle of camera
+        // どれだけ傾けられるか
+        maxPolarAngle: 0.4 * Math.PI,
+        // Set to true to disable panning
+        // noPan: true,
+        // Set to true to disable rotating
+        // noRotate: false,
+        // Set to true to disable zooming
+        // noZoom: false
+    };
+    Procedural.configureControls(configuration);
+
+    // Initialize the engine with a location and inject into page
+    const container = document.getElementById('container');
+
+    const datasource = {
+        elevation: {
+            apiKey: null
+        },
+        imagery: {
+            apiKey: null,
+            urlFormat: 'https://maps.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg',
+            attribution: ' | <a href="https://maps.gsi.go.jp/development/ichiran.html">国土地理院</a>'
+        }
+    }
+    Procedural.init( { container, datasource } );
+    Procedural.setCameraModeControlVisible( true );
+    Procedural.setCompassVisible( true );
+    // Procedural.setUserLocationControlVisible( true );
+    Procedural.setRotationControlVisible( true );
+    Procedural.setZoomControlVisible( true );
+
+    Procedural.onOverlayAdded = function ( name ) {
+        // console.log( 'Overlay added:', name );
+    }
+
+    createOptions(document.getElementById('chose-select'), mountains);
+    firstMove(document.getElementById('chose-select'), mountains, mountainName);
+
+    function parsePramameter(results) {
+        var pair=location.search.substring(1).split('&');
+        for (var i=0; pair[i]; i++) {
+            var kv = pair[i].split('=');
+            results[kv[0]]=kv[1];
+        }
+    }
+
+    function createOptions(elm, mntns) {
+        for (var i = 1; i < mntns.features.length; i++) {
+            var option = document.createElement('option');
+            option.text = mntns.features[i].properties.name;
+            option.value = mntns.features[i].geometry.coordinates[0] + ',' + mntns.features[i].geometry.coordinates[1];
+            elm.appendChild(option);
+        }
+    }
+
+    function addStyle(mntns) {
+        for (var i = 1; i < mntns.features.length; i++) {
+            mntns.features[i].properties.borderRadius = 23;
+            mntns.features[i].properties.padding = 5;
+            mntns.features[i].properties.fontSize = 13;
+            mntns.features[i].properties.background = '#44b6f7';
+            mntns.features[i].properties.anchor = 'center';
+        }
+    }
+
+    function move(coords) {
+        var c = coords.split(',');
+
+        // これをしないと白根山（日光白根山）に移動して西にパンした時画面が真っ白になる
+        var target = { latitude: parseFloat(c[1]), longitude: parseFloat(c[0]), features: 'hiking' };
+        Procedural.displayLocation(target);
+
+        var target = {
+            latitude: parseFloat(c[1]),
+            longitude: parseFloat(c[0]),
+            // angle: 0,
+            // bearing: 0,
+            // distance: 1000,
+            animationDuration: 0.5
+        };
+        Procedural.focusOnLocation(target);
+
+        updateRoute();
+    }
+
+    function firstMove(elm, mntns, name) {
+        for (var i = 1; i < mntns.features.length; i++) {
+            if (mntns.features[i].properties.name === name) {
+                const latitude = mntns.features[i].geometry.coordinates[1];
+                const longitude = mntns.features[i].geometry.coordinates[0];
+                Procedural.displayLocation( {
+                    latitude: latitude, longitude: longitude, features: 'hiking'
+                } );
+                break;
+            }
+        }
+
+        for (var i = 0; i < elm.options.length; i++) {
+            if (elm.options[i].text === name) {
+                elm.options[i].selected = true;
+                break;
+            }
+        }
+
+        updateRoute();
+        Procedural.addOverlay(JSON.parse(JSON.stringify(mountains)));
+    }
+
+    function updateRoute() {
+        Procedural.removeOverlay('route1');
+        Procedural.addOverlay(JSON.parse(JSON.stringify(route1)));
+    }
+
+    function switchMountain(select) {
+        move(select.value);
+    }
+    </script>
+</html>
